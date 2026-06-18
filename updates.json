@@ -1,0 +1,12 @@
+{
+  "addons": {
+    "livechat-screenshot@cyp.world": {
+      "updates": [
+        {
+          "version": "1.0.1",
+          "update_link": "https://github.com/betcypsolutions/browser-extension/releases/download/v1.0.1/ulak-ekran-goruntusu-1.0.1.xpi"
+        }
+      ]
+    }
+  }
+}

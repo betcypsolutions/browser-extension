@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Ulak Ekran Görüntüsü",
   "description": "Herhangi bir sekmede ekran görüntüsü al, kırp ve sohbete gönder.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "browser_specific_settings": {
     "gecko": {
       "id": "livechat-screenshot@cyp.world",
@@ -23,19 +23,40 @@
     "48": "icons/icon-48.png",
     "128": "icons/icon-128.png"
   },
-  "background": { "scripts": ["background.js"] },
-  "permissions": ["activeTab", "scripting", "storage", "notifications", "tabs", "contextMenus"],
-  "host_permissions": ["<all_urls>"],
+  "background": {
+    "scripts": [
+      "background.js"
+    ]
+  },
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "notifications",
+    "tabs",
+    "contextMenus"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle",
       "all_frames": true
     },
     {
-      "matches": ["<all_urls>"],
-      "js": ["collector.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "collector.js"
+      ],
       "run_at": "document_start",
       "all_frames": true,
       "world": "MAIN"
@@ -43,13 +64,22 @@
   ],
   "commands": {
     "capture-screenshot": {
-      "suggested_key": { "default": "Alt+Shift+S", "mac": "Alt+Shift+S" },
+      "suggested_key": {
+        "default": "Alt+Shift+S",
+        "mac": "Alt+Shift+S"
+      },
       "description": "Ekran görüntüsü al (bölge) ve sohbete gönder"
     },
     "capture-fullpage": {
-      "suggested_key": { "default": "Alt+Shift+E", "mac": "Alt+Shift+E" },
+      "suggested_key": {
+        "default": "Alt+Shift+E",
+        "mac": "Alt+Shift+E"
+      },
       "description": "Tam sayfa (scroll) yakala ve sohbete gönder"
     }
   },
-  "options_ui": { "page": "options.html", "open_in_tab": true }
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  }
 }
