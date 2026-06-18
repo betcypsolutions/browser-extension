@@ -8,6 +8,12 @@
 #   ./bump.sh 1.4.2                # tam sürüm ver
 #   ./bump.sh patch --sign         # artır + AMO'da imzala (anahtarlar env'den)
 #   ./bump.sh patch --sign --publish   # + publish/ klasörüne xpi + updates.json üret
+#   ./bump.sh patch --release      # HER ŞEY OTOMATİK: imzala + publish + commit/push
+#                                  #   + GitHub release olustur + xpi yukle (tek komut)
+#
+# --release icin (birini sec):
+#   - gh CLI:   sudo apt install gh && gh auth login   (onerilen, token env'de tutulmaz)
+#   - ya da:    export GH_TOKEN="<contents:write yetkili PAT>"
 #
 # İmza için ortam değişkenleri (önce export et):
 #   export AMO_JWT_ISSUER="user:....."
@@ -25,11 +31,14 @@ set -e
 cd "$(dirname "$0")"
 
 ARG="${1:-patch}"
-DO_SIGN=0; DO_PUB=0
+DO_SIGN=0; DO_PUB=0; DO_REL=0
 for a in "$@"; do
   [ "$a" = "--sign" ] && DO_SIGN=1
   [ "$a" = "--publish" ] && DO_PUB=1
+  [ "$a" = "--release" ] && DO_REL=1
 done
+# --release, imzalı yayın dosyalarını gerektirir → otomatik sign+publish.
+if [ "$DO_REL" = "1" ]; then DO_SIGN=1; DO_PUB=1; fi
 
 GECKO_ID="livechat-screenshot@cyp.world"
 
@@ -91,7 +100,56 @@ json.dump(data, open("updates.json", "w"), indent=2); open("updates.json","a").w
 PY
     echo "✓ updates.json guncellendi  (link: $LINK)"
     echo "✓ publish/$XPI_NAME hazir"
-    echo "  1) updates.json'u commit + push et (main)."
-    echo "  2) GitHub'da 'v$NEWVER' release'i olustur, publish/$XPI_NAME dosyasini ekle."
+    if [ "$DO_REL" != "1" ]; then
+      echo "  1) updates.json'u commit + push et (main)."
+      echo "  2) GitHub'da 'v$NEWVER' release'i olustur, publish/$XPI_NAME dosyasini ekle."
+    fi
   fi
+fi
+
+# --- Otomatik GitHub release (--release): commit+push + release + xpi yukle ---
+if [ "$DO_REL" = "1" ]; then
+  : "${GH_REPO:?--release icin GH_REPO gerekli (ornek: export GH_REPO=kullanici/repo)}"
+  TAG="v$NEWVER"
+  XPI_NAME="ulak-ekran-goruntusu-$NEWVER.xpi"
+  XPI_PATH="publish/$XPI_NAME"
+  [ -f "$XPI_PATH" ] || { echo "HATA: $XPI_PATH yok (sign/publish basarisiz?)"; exit 1; }
+
+  echo "→ commit + push (updates.json main'e gitsin)"
+  git add -A
+  git commit -m "$TAG" || echo "  (commit edilecek yeni degisiklik yok)"
+  git push
+
+  echo "→ GitHub release $TAG olusturuluyor + xpi yukleniyor"
+  if command -v gh >/dev/null 2>&1; then
+    gh release create "$TAG" "$XPI_PATH" -t "Ulak $NEWVER" -n "Otomatik yayin $TAG" \
+      || { echo "HATA: gh release create basarisiz"; exit 1; }
+    echo "✓ Release $TAG yayinda (gh)"
+  elif [ -n "${GH_TOKEN:-}" ]; then
+    REL=$(curl -s -X POST \
+      -H "Authorization: token $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+      "https://api.github.com/repos/$GH_REPO/releases" \
+      -d "{\"tag_name\":\"$TAG\",\"target_commitish\":\"main\",\"name\":\"Ulak $NEWVER\",\"body\":\"Otomatik yayin $TAG\"}")
+    REL_ID=$(printf '%s' "$REL" | python3 -c 'import sys,json
+try:
+    print(json.load(sys.stdin).get("id",""))
+except Exception:
+    print("")')
+    if [ -z "$REL_ID" ]; then echo "HATA: release olusturulamadi: $REL"; exit 1; fi
+    curl -s -X POST \
+      -H "Authorization: token $GH_TOKEN" -H "Content-Type: application/octet-stream" \
+      --data-binary @"$XPI_PATH" \
+      "https://uploads.github.com/repos/$GH_REPO/releases/$REL_ID/assets?name=$XPI_NAME" >/dev/null \
+      || { echo "HATA: asset yuklenemedi"; exit 1; }
+    echo "✓ Release $TAG yayinda + xpi yuklendi (API)"
+  else
+    echo "HATA: --release icin 'gh' CLI ya da GH_TOKEN gerekli."
+    echo "  Kur:   sudo apt install gh && gh auth login"
+    echo "  Ya da: export GH_TOKEN=<contents:write yetkili PAT>"
+    exit 1
+  fi
+  echo ""
+  echo "Kontrol:"
+  echo "  https://raw.githubusercontent.com/$GH_REPO/main/updates.json"
+  echo "  https://github.com/$GH_REPO/releases/download/$TAG/$XPI_NAME"
 fi

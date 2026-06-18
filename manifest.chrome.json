@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Ulak Ekran Görüntüsü",
   "description": "Herhangi bir sekmede ekran görüntüsü al, kırp ve sohbete gönder.",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "action": {
     "default_title": "Ulak — ekran görüntüsü al ve gönder (Alt+Shift+S)",
     "default_icon": {
