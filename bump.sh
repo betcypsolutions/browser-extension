@@ -40,6 +40,21 @@ done
 # --release, imzalı yayın dosyalarını gerektirir → otomatik sign+publish.
 if [ "$DO_REL" = "1" ]; then DO_SIGN=1; DO_PUB=1; fi
 
+# --release ÖN KONTROL: GitHub yetkisi yoksa sürümü ARTIRMADAN en başta dur
+# (yoksa updates.json olmayan bir release'e işaret eden kırık durum oluşuyordu).
+if [ "$DO_REL" = "1" ]; then
+  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    : # gh hazır
+  elif [ -n "${GH_TOKEN:-}" ]; then
+    : # token hazır
+  else
+    echo "DURDURULDU (sürüm artırılmadı): --release için GitHub yetkisi yok."
+    echo "  gh auth login        (önerilen)"
+    echo "  ya da: export GH_TOKEN=<contents:write yetkili PAT>"
+    exit 1
+  fi
+fi
+
 GECKO_ID="livechat-screenshot@cyp.world"
 
 # --- yeni sürümü hesapla ---
