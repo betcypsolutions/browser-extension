@@ -6,8 +6,12 @@ const api = globalThis.browser ?? globalThis.chrome;
 const PANEL_MATCHES = ['http://localhost:4200/*', 'https://chat.cyp.world/*'];
 
 const DEFAULT_API_BASE = 'https://chat-api.cyp.world';
+// Panel origin'leri (sondaki /* olmadan) — gömülü iframe'i tanımak için.
+const PANEL_ORIGINS = PANEL_MATCHES.map((p) => p.replace(/\/\*$/, ''));
 let lastPanelOrigin = null;   // gönderim sonrası bildirimden panel açmak için
 let lastSentChannelId = null; // bildirime tıklayınca açılacak sohbet
+let lastCaptureTabId = null;  // ekran görüntüsünün alındığı sekme (gömülü iframe'e yazmak için)
+let lastPanelTabId = null;    // gömülü chat iframe'inin BULUNDUĞU sekme (content.js token relay'inden)
 
 // API adresi → panel origin eşlemesi (override modunda doğru token için).
 const API_TO_PANEL = {
@@ -127,6 +131,7 @@ async function triggerCapture() {
       await notify('Bu sayfa yakalanamıyor', 'Tarayıcı iç sayfaları (chrome://, about: vb.) görüntülenemez.');
       return;
     }
+    lastCaptureTabId = tab.id;
 
     // 1) Sayfada bölge seçtir (enjeksiyon başarısızsa tüm sayfayı al).
     let region = null;
@@ -237,6 +242,7 @@ async function triggerFullPage() {
       await notify('Bu sayfa yakalanamıyor', 'Tarayıcı iç sayfaları (chrome://, about: vb.) görüntülenemez.');
       return;
     }
+    lastCaptureTabId = tab.id;
     await notify('Tam sayfa yakalanıyor…', 'Sayfa kaydırılıp birleştiriliyor, birkaç saniye sürebilir.');
     const dataUrl = await captureFullPage(tab);
     const context = await gatherContext(tab.id);
@@ -282,9 +288,44 @@ async function openSentChat() {
     if (tabs && tabs.length) {
       await api.tabs.update(tabs[0].id, { active: true, url: target });
       await api.windows.update(tabs[0].windowId, { focused: true });
-    } else {
-      await api.tabs.create({ url: target });
     }
+    // Açık standalone panel sekmesi YOKSA yeni chat.cyp.world sekmesi AÇMA:
+    // gömülü (embed) kullanıcıda bu, panelin LOGIN sayfasına atıyordu. Mesaj
+    // zaten bulunduğun gömülü sohbette canlı socket ile görünür.
+  } catch (_) { /* yut */ }
+}
+
+// Gönderim/stage sonrası: ekran görüntüsünün alındığı sayfadaki GÖMÜLÜ mesajlaşma
+// widget'ını aç (host'taki LiveChatMessaging.open()'ı MAIN dünyada çağır) → kullanıcı
+// sohbeti hemen görsün. Loader yoksa (standalone panel) sessiz geçer.
+// SW yeniden başlayınca bellekteki lastPanelTabId kaybolabilir → storage.session yedeği.
+async function getPanelTabId() {
+  if (lastPanelTabId != null) return lastPanelTabId;
+  try { const r = await api.storage.session.get('lastPanelTabId'); return r.lastPanelTabId ?? null; }
+  catch (_) { return null; }
+}
+
+async function openEmbedWidget(tabId) {
+  let t = tabId;
+  if (t == null) { const p = await getPanelTabId(); t = p != null ? p : lastCaptureTabId; }
+  if (t == null) return;
+  try {
+    await api.scripting.executeScript({
+      target: { tabId: t },
+      world: 'MAIN',
+      func: () => {
+        try {
+          if (window.LiveChatMessaging && typeof window.LiveChatMessaging.open === 'function') {
+            window.LiveChatMessaging.open();
+          }
+        } catch (e) { /* yut */ }
+      },
+    });
+    try { await api.tabs.update(t, { active: true }); } catch (_) { /* yut */ }
+    try {
+      const tt = await api.tabs.get(t);
+      if (tt) await api.windows.update(tt.windowId, { focused: true });
+    } catch (_) { /* yut */ }
   } catch (_) { /* yut */ }
 }
 
@@ -318,20 +359,57 @@ async function injectPending(tabId, payload) {
 }
 
 // "Sohbette onayla": görseli GÖNDERMEDEN panelin sohbet kutusuna düşür.
+// Bekleyen görseli (a) gömülü panel iframe'ine — ekran görüntüsünün alındığı
+// sekmede — ya da (b) açık standalone panel sekmesine düşürür. Yeni chat.cyp.world
+// sekmesi AÇMAZ (gömülü kullanıcıda login'e atıyordu). Hiçbiri yoksa false döner.
+// Bir sekmedeki panel iframe'ine (varsa) bekleyen görseli yazar; bulamazsa false.
+async function writePendingToTab(tabId, payload) {
+  try {
+    const res = await api.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func: (key, val, panelOrigins) => {
+        if (!panelOrigins.includes(location.origin)) return false; // yalnız panel iframe'i
+        try { localStorage.setItem(key, val); } catch (e) { /* partitioned */ }
+        try { sessionStorage.setItem(key, val); } catch (e) { /* yut */ }
+        try { window.dispatchEvent(new CustomEvent('ulak:pendingShot')); } catch (e) { /* yut */ }
+        return true;
+      },
+      args: ['ulak:pendingShot', JSON.stringify(payload), PANEL_ORIGINS],
+    });
+    return !!(res && res.some((r) => r && r.result === true));
+  } catch (_) { return false; }
+}
+
+// Bekleyen görseli gömülü panel iframe'ine düşürür: önce ekran görüntüsünün
+// alındığı sekme, sonra gömülü chat'in BULUNDUĞU sekme (başka sayfadaysan da
+// açık bo.cyp.zone sekmesine düşer); o da yoksa açık standalone panel sekmesi.
+// Yeni chat.cyp.world sekmesi AÇMAZ. Başarılıysa sekme id'sini, yoksa null döner.
 async function stageToComposer(origin, channelId, dataUrl, fileName, content) {
   const payload = { dataUrl, fileName: fileName || 'ulak-ekran.png', channelId, caption: content || '', ts: Date.now() };
-  const target = origin + '/channels?id=' + channelId;
-  const tabs = await queryPanelTabs([origin + '/*']);
-  let tab = tabs && tabs[0];
-  if (tab) {
-    try { await api.tabs.update(tab.id, { active: true, url: target }); } catch (_) { /* yut */ }
-    try { await api.windows.update(tab.windowId, { focused: true }); } catch (_) { /* yut */ }
-  } else {
-    tab = await api.tabs.create({ url: target });
+
+  // (a) Gömülü: aday sekmeler — yakalanan sekme + gömülü chat sekmesi (SW restart'a dayanıklı).
+  const panelTabId = await getPanelTabId();
+  const candidates = [...new Set([lastCaptureTabId, panelTabId].filter((x) => x != null))];
+  for (const tabId of candidates) {
+    if (await writePendingToTab(tabId, payload)) {
+      try { await api.tabs.update(tabId, { active: true }); } catch (_) { /* yut */ }
+      try { const t = await api.tabs.get(tabId); if (t) await api.windows.update(t.windowId, { focused: true }); } catch (_) { /* yut */ }
+      return tabId;
+    }
   }
-  await waitForTabComplete(tab.id, 10000);
-  await injectPending(tab.id, payload);
-  return true;
+
+  // (b) Açık standalone panel sekmesi varsa oraya düşür (klasik akış).
+  const tabs = await queryPanelTabs([origin + '/*']);
+  const tab = tabs && tabs[0];
+  if (tab) {
+    try { await api.tabs.update(tab.id, { active: true, url: origin + '/channels?id=' + channelId }); } catch (_) { /* yut */ }
+    try { await api.windows.update(tab.windowId, { focused: true }); } catch (_) { /* yut */ }
+    await waitForTabComplete(tab.id, 8000);
+    await injectPending(tab.id, payload);
+    return tab.id;
+  }
+
+  return null;
 }
 
 // Bildirim de tıklanırsa aynı yere götürür (otomatik açılış kaçarsa yedek).
@@ -487,10 +565,10 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         if (!id) { sendResponse({ error: 'Sohbet seçilmedi' }); return; }
         const { auth, apiBase, panelOrigin } = await resolveAuthAndApi();
         if (!auth || !auth.token) { sendResponse({ error: 'AUTH', apiBase, diag: await getAuthDiag(panelOrigin) }); return; }
-        const origin = (auth && auth.origin) || panelOrigin;
-        if (!origin) { sendResponse({ error: 'Panel sekmesi bulunamadı. Önce chat panelini açıp giriş yap.' }); return; }
-        await stageToComposer(origin, id, msg.dataUrl, msg.fileName, msg.content);
-        sendResponse({ ok: true });
+        const origin = (auth && auth.origin) || panelOrigin || lastPanelOrigin;
+        const stagedTabId = origin ? await stageToComposer(origin, id, msg.dataUrl, msg.fileName, msg.content) : null;
+        if (stagedTabId != null) { await openEmbedWidget(stagedTabId); sendResponse({ ok: true }); return; }
+        sendResponse({ error: 'Mesajlaşmanın açık olduğu bir sekme bulunamadı. bo.cyp.zone (gömülü chat) sekmesini açık tut ya da "Direkt gönder" kullan.' });
       } catch (e) { sendResponse({ error: String((e && e.message) || e) }); }
       return;
     }
@@ -527,7 +605,7 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           } catch (e) { lastErr = String((e && e.message) || e); }
         }
         sendResponse({ ok: sent === ids.length, sent, total: ids.length, error: lastErr || undefined });
-        if (sent > 0) await openSentChat(); // otomatik: panel sekmesinde sohbeti aç
+        if (sent > 0) { await openSentChat(); await openEmbedWidget(); } // gömülü widget'ı aç + (varsa) panel sekmesini odakla
       } catch (e) { sendResponse({ error: String((e && e.message) || e) }); }
       return;
     }
@@ -536,6 +614,13 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       return;
     }
     if (msg && msg.type === 'TOKEN' && msg.token && msg.origin) {
+      // Bu TOKEN, gömülü chat iframe'inden (panel origin'i) geliyor → o iframe'in
+      // bulunduğu SEKMEYİ hatırla. Böylece başka bir sayfada (YouTube vb.) ekran
+      // görüntüsü alıp gönderince, açık bo.cyp.zone sekmesine düşürüp açabiliriz.
+      if (PANEL_ORIGINS.includes(msg.origin) && _sender && _sender.tab && _sender.tab.id != null) {
+        lastPanelTabId = _sender.tab.id;
+        try { await api.storage.session.set({ lastPanelTabId }); } catch (_) { /* yut */ }
+      }
       const stored = await api.storage.session.get('authByOrigin');
       const map = stored.authByOrigin || {};
       map[msg.origin] = { token: msg.token, user: msg.user, origin: msg.origin };

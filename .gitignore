@@ -9,6 +9,9 @@ dist/
 # Release'e yüklenecek xpi (GitHub Releases asset)
 publish/
 
+# Kişisel deploy notu (repoya/public'e gitmesin)
+DEPLOY.txt
+
 # Bağımlılık / sistem
 node_modules/
 .DS_Store

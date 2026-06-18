@@ -4,13 +4,28 @@
 // Giriş yapan kullanıcının JWT'sini arka plana iletir — hiçbir gizli anahtar yok.
 const api = globalThis.browser ?? globalThis.chrome;
 
+// Token'ı önce localStorage'dan, yoksa sessionStorage'dan oku. White-label embed
+// (/embed/*) üçüncü-taraf partitioned iframe'de oturumu sessionStorage'da tutuyor →
+// uzantı bo.cyp.zone gibi gömülü sistemlerde de token'ı buradan bulup gönderebilsin.
+function readLC(key) {
+  try {
+    const v = localStorage.getItem(key);
+    if (v) return v;
+  } catch (_) { /* localStorage engelli olabilir */ }
+  try {
+    return sessionStorage.getItem(key);
+  } catch (_) {
+    return null;
+  }
+}
+
 function relayToken() {
   try {
-    const token = localStorage.getItem('livechat:token');
+    const token = readLC('livechat:token');
     if (!token) return;
     let user = null;
     try {
-      user = JSON.parse(localStorage.getItem('livechat.panel.user') || 'null');
+      user = JSON.parse(readLC('livechat.panel.user') || 'null');
     } catch (_) {
       user = null;
     }
