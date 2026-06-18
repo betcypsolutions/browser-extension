@@ -203,7 +203,7 @@ function annRedoFn() { if (!annRedo.length) return; annShapes.push(annRedo.pop()
 annCanvas.addEventListener('pointerdown', (e) => {
   if (e.button !== 0) return;
   const p = annPos(e);
-  if (annTool === 'text') { openTextInput(p, e); return; }
+  if (annTool === 'text') { e.preventDefault(); openTextInput(p, e); return; }
   if (annTool === 'step') {
     annStepN += 1;
     commitShape({ type: 'step', x: p.x, y: p.y, n: annStepN, color: annColor, r: Math.max(12, annLineW * 4) });
@@ -241,11 +241,11 @@ function openTextInput(p, e) {
   const inp = document.createElement('input');
   inp.type = 'text';
   inp.placeholder = 'Metin yaz, Enter…';
-  inp.style.cssText = 'position:fixed;z-index:60;font:600 16px system-ui;padding:3px 7px;border:1px solid #2563eb;border-radius:6px;background:#1a1d24;color:#fff;min-width:140px;';
-  inp.style.left = e.clientX + 'px';
-  inp.style.top = e.clientY + 'px';
+  inp.style.cssText = 'position:fixed;z-index:90;font:600 16px system-ui;padding:4px 8px;border:1px solid #2563eb;border-radius:6px;background:#1a1d24;color:#fff;min-width:160px;outline:none;box-shadow:0 4px 16px rgba(0,0,0,.5);';
+  // Ekrandan taşmasın
+  inp.style.left = Math.max(8, Math.min(e.clientX, window.innerWidth - 180)) + 'px';
+  inp.style.top = Math.max(8, Math.min(e.clientY, window.innerHeight - 44)) + 'px';
   document.body.appendChild(inp);
-  inp.focus();
   let done = false;
   const commit = () => {
     if (done) return; done = true;
@@ -257,10 +257,18 @@ function openTextInput(p, e) {
     }
   };
   inp.addEventListener('keydown', (ev) => {
+    ev.stopPropagation();   // global Esc/kısayollar input'a karışmasın
     if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
-    else if (ev.key === 'Escape') { done = true; inp.remove(); }
+    else if (ev.key === 'Escape') { ev.preventDefault(); done = true; inp.remove(); }
   });
-  inp.addEventListener('blur', commit);
+  // ÖNEMLİ: focus + blur dinleyicisini bir tick ertele. Aksi halde input'u
+  // oluşturan tıklamanın hemen ardından gelen blur, input'u anında kapatıyordu
+  // ("T tıklıyorum, kutu çıkmıyor / işlevi yok"). Erteleme ile kutu açık kalır.
+  setTimeout(() => {
+    inp.focus();
+    inp.select();
+    inp.addEventListener('blur', commit);
+  }, 60);
 }
 
 // ---------- sohbet seçici ----------

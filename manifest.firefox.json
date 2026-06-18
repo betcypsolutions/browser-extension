@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Ulak Ekran Görüntüsü",
   "description": "Herhangi bir sekmede ekran görüntüsü al, kırp ve sohbete gönder.",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "browser_specific_settings": {
     "gecko": {
       "id": "livechat-screenshot@cyp.world",
