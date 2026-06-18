@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Ayarlar — Ulak Ekran Görüntüsü</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0f1115; color: #e8eaed; padding: 1.5rem; max-width: 520px; }
+    h1 { font-size: 1.1rem; }
+    label { display: block; margin: 1rem 0 0.4rem; font-size: 0.9rem; }
+    input[type=text] { width: 100%; padding: 0.55rem 0.8rem; border-radius: 8px; border: 1.5px solid #2a2f3a; background: #1a1d24; color: #e8eaed; font-size: 0.9rem; }
+    .row { display: flex; gap: 0.5rem; margin-top: 0.6rem; }
+    button { padding: 0.5rem 1rem; border: 0; border-radius: 8px; cursor: pointer; font-weight: 700; }
+    .preset { background: #1a1d24; color: #e8eaed; border: 1px solid #2a2f3a; }
+    .save { background: #2563eb; color: #fff; }
+    .ok { color: #10b981; font-size: 0.85rem; margin-top: 0.6rem; height: 1rem; }
+    .hint { color: #9aa0aa; font-size: 0.78rem; margin-top: 0.3rem; }
+  </style>
+</head>
+<body>
+  <h1>📨 Ulak Ekran Görüntüsü — Ayarlar</h1>
+  <label for="apiBase">API adresi (agent-api)</label>
+  <input id="apiBase" type="text" placeholder="Otomatik (boş bırak — girişli panele göre seçilir)" />
+  <div class="hint">
+    <b>Boş bırak = Otomatik</b> (önerilen): hangi panelde girişliysen (lokal <code>4200</code> / prod <code>chat.cyp.world</code>)
+    o ortamın API'si otomatik kullanılır. Yalnız özel kurulumda elle adres gir.
+  </div>
+  <div class="row">
+    <button class="preset" data-v="">Otomatik (önerilen)</button>
+    <button class="preset" data-v="https://chat-api.cyp.world">Production</button>
+    <button class="preset" data-v="http://localhost:3010">Lokal (3010)</button>
+    <button class="save" id="save">Kaydet</button>
+  </div>
+  <div class="ok" id="ok"></div>
+  <script src="options.js"></script>
+</body>
+</html>

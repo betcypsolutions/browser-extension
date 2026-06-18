@@ -1,0 +1,17 @@
+# Üretilen/derlenen çıktılar
+# manifest.json: build.sh manifest.{chrome,firefox}.json'dan üretir
+manifest.json
+# web-ext sign çıktısı (imzalı .xpi) ve AMO upload izi
+web-ext-artifacts/
+.amo-upload-uuid
+# package.sh zip'leri
+dist/
+# Release'e yüklenecek xpi (GitHub Releases asset)
+publish/
+
+# Bağımlılık / sistem
+node_modules/
+.DS_Store
+*.log
+
+# NOT: updates.json BİLEREK izlenir (oto-güncelleme için raw URL'den servis edilir).
