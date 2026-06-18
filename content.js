@@ -29,7 +29,10 @@ function relayToken() {
     } catch (_) {
       user = null;
     }
-    api.runtime.sendMessage({ type: 'TOKEN', token, user, origin: location.origin });
+    // Panel kendi API adresini bildirirse (livechat:apiBase) onu da ilet → uzantı
+    // domain-bağımsız çalışır (yeni bir sisteme gömülse bile API'yi panelden öğrenir).
+    const apiBase = readLC('livechat:apiBase') || null;
+    api.runtime.sendMessage({ type: 'TOKEN', token, user, apiBase, origin: location.origin });
   } catch (_) {
     /* erişilemezse sessiz geç */
   }

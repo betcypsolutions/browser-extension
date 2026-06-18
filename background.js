@@ -35,8 +35,20 @@ async function resolveAuthAndApi() {
   }
   const auth = await getAuth(null);
   const origin = auth && auth.origin;
-  const apiBase = origin ? (PANEL_TO_API[origin] || DEFAULT_API_BASE) : DEFAULT_API_BASE;
+  const apiBase = resolveApiBase(auth, origin);
   return { auth, apiBase, panelOrigin: origin || null };
+}
+
+// API adresini DOMAIN-BAĞIMSIZ çöz:
+//   1) panelin bildirdiği apiBase (livechat:apiBase — en güvenilir, her sisteme uyar)
+//   2) bilinen origin eşlemesi (chat.cyp.world→chat-api, localhost:4200→3010)
+//   3) GENEL: panelle AYNI origin (white-label proxy: panel + /api aynı domain)
+//   4) varsayılan
+function resolveApiBase(auth, origin) {
+  if (auth && auth.apiBase) return auth.apiBase;
+  if (origin && PANEL_TO_API[origin]) return PANEL_TO_API[origin];
+  if (origin) return origin;
+  return DEFAULT_API_BASE;
 }
 
 // Tarayıcı iç sayfaları — yakalama/enjeksiyon burada çalışmaz.
@@ -367,14 +379,17 @@ async function writePendingToTab(tabId, payload) {
   try {
     const res = await api.scripting.executeScript({
       target: { tabId, allFrames: true },
-      func: (key, val, panelOrigins) => {
-        if (!panelOrigins.includes(location.origin)) return false; // yalnız panel iframe'i
+      func: (key, val) => {
+        // Panel/embed frame'i = livechat token'ı olan frame (hangi domain olursa olsun).
+        var hasTok = false;
+        try { hasTok = !!(localStorage.getItem('livechat:token') || sessionStorage.getItem('livechat:token')); } catch (e) { hasTok = false; }
+        if (!hasTok) return false;
         try { localStorage.setItem(key, val); } catch (e) { /* partitioned */ }
         try { sessionStorage.setItem(key, val); } catch (e) { /* yut */ }
         try { window.dispatchEvent(new CustomEvent('ulak:pendingShot')); } catch (e) { /* yut */ }
         return true;
       },
-      args: ['ulak:pendingShot', JSON.stringify(payload), PANEL_ORIGINS],
+      args: ['ulak:pendingShot', JSON.stringify(payload)],
     });
     return !!(res && res.some((r) => r && r.result === true));
   } catch (_) { return false; }
@@ -439,8 +454,9 @@ async function readTokenFromPanelTab(patterns) {
       const results = await api.scripting.executeScript({
         target: { tabId: t.id },
         func: () => ({
-          token: localStorage.getItem('livechat:token'),
-          user: JSON.parse(localStorage.getItem('livechat.panel.user') || 'null'),
+          token: localStorage.getItem('livechat:token') || sessionStorage.getItem('livechat:token'),
+          user: JSON.parse(localStorage.getItem('livechat.panel.user') || sessionStorage.getItem('livechat.panel.user') || 'null'),
+          apiBase: localStorage.getItem('livechat:apiBase') || sessionStorage.getItem('livechat:apiBase') || null,
           origin: location.origin,
         }),
       });
@@ -459,7 +475,10 @@ async function getAuth(panelOrigin) {
   const stored = await api.storage.session.get('authByOrigin');
   const map = stored.authByOrigin || {};
   const save = async (r) => {
-    map[r.origin] = { token: r.token, user: r.user, origin: r.origin };
+    map[r.origin] = {
+      token: r.token, user: r.user, origin: r.origin,
+      apiBase: r.apiBase || (map[r.origin] && map[r.origin].apiBase) || null,
+    };
     await api.storage.session.set({ authByOrigin: map });
     return map[r.origin];
   };
@@ -614,16 +633,17 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       return;
     }
     if (msg && msg.type === 'TOKEN' && msg.token && msg.origin) {
-      // Bu TOKEN, gömülü chat iframe'inden (panel origin'i) geliyor → o iframe'in
-      // bulunduğu SEKMEYİ hatırla. Böylece başka bir sayfada (YouTube vb.) ekran
-      // görüntüsü alıp gönderince, açık bo.cyp.zone sekmesine düşürüp açabiliriz.
-      if (PANEL_ORIGINS.includes(msg.origin) && _sender && _sender.tab && _sender.tab.id != null) {
+      // Token taşıyan HER frame bir panel/embed'dir (domain sabit liste GEREKMEZ;
+      // hangi sisteme gömülürse gömülsün çalışır) → o sekmeyi hatırla, böylece başka
+      // bir sayfada (YouTube vb.) ekran görüntüsü alıp gönderince açık chat sekmesine düşür.
+      if (_sender && _sender.tab && _sender.tab.id != null) {
         lastPanelTabId = _sender.tab.id;
         try { await api.storage.session.set({ lastPanelTabId }); } catch (_) { /* yut */ }
       }
       const stored = await api.storage.session.get('authByOrigin');
       const map = stored.authByOrigin || {};
-      map[msg.origin] = { token: msg.token, user: msg.user, origin: msg.origin };
+      // apiBase: panel kendi bildirdiyse sakla → API'yi domain'den bağımsız biliriz.
+      map[msg.origin] = { token: msg.token, user: msg.user, origin: msg.origin, apiBase: msg.apiBase || null };
       await api.storage.session.set({ authByOrigin: map });
       sendResponse({ ok: true });
       return;
