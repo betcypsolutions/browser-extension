@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ulak Ekran Görüntüsü — Kurulum</title>
+  <style>
+    :root {
+      --bg:#0e1014; --card:#16191f; --card2:#1c2027; --border:#2a2e38;
+      --text:#e9eaed; --muted:#8a8f99; --accent:#3b82f6; --accent2:#2563eb; --ok:#22c55e;
+    }
+    * { box-sizing:border-box; }
+    body {
+      margin:0; min-height:100vh; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+      background:radial-gradient(1200px 600px at 50% -10%, #1a2030, var(--bg)); color:var(--text);
+      display:flex; align-items:center; justify-content:center; padding:1.5rem;
+    }
+    .wrap { width:100%; max-width:560px; }
+    .head { text-align:center; margin-bottom:1.5rem; }
+    .logo {
+      width:84px; height:84px; border-radius:20px; margin:0 auto 0.9rem;
+      box-shadow:0 10px 30px rgba(0,0,0,0.5); display:block;
+    }
+    h1 { font-size:1.5rem; margin:0 0 0.3rem; font-weight:700; }
+    .sub { color:var(--muted); font-size:0.95rem; margin:0; }
+    .card {
+      background:var(--card); border:1px solid var(--border); border-radius:16px;
+      padding:1.4rem 1.4rem 1.5rem; box-shadow:0 12px 40px rgba(0,0,0,0.35);
+    }
+    .browser { display:flex; align-items:center; gap:0.6rem; font-size:0.86rem; color:var(--muted); margin-bottom:1rem; }
+    .browser .dot { width:8px; height:8px; border-radius:50%; background:var(--ok); }
+    .btn {
+      display:flex; align-items:center; justify-content:center; gap:0.5rem; width:100%;
+      padding:0.95rem 1.2rem; border-radius:12px; border:0; cursor:pointer;
+      font:inherit; font-size:1.02rem; font-weight:700; text-decoration:none;
+      background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#fff;
+      transition:filter 0.12s, transform 0.08s;
+    }
+    .btn:hover { filter:brightness(1.08); }
+    .btn:active { transform:translateY(1px); }
+    .btn.secondary { background:var(--card2); color:var(--text); border:1px solid var(--border); }
+    .steps { margin:1.1rem 0 0; padding:0; list-style:none; counter-reset:s; }
+    .steps li {
+      counter-increment:s; position:relative; padding:0.5rem 0 0.5rem 2.2rem;
+      font-size:0.92rem; color:var(--text); border-top:1px solid var(--border);
+    }
+    .steps li:first-child { border-top:0; }
+    .steps li::before {
+      content:counter(s); position:absolute; left:0; top:0.45rem; width:1.5rem; height:1.5rem;
+      border-radius:50%; background:var(--accent); color:#fff; font-size:0.8rem; font-weight:700;
+      display:flex; align-items:center; justify-content:center;
+    }
+    code { background:var(--card2); border:1px solid var(--border); border-radius:6px; padding:0.1rem 0.4rem; font-size:0.85em; }
+    .note { margin-top:1.1rem; font-size:0.82rem; color:var(--muted); line-height:1.5; }
+    .hidden { display:none; }
+    .foot { text-align:center; color:var(--muted); font-size:0.78rem; margin-top:1.2rem; }
+    .ico { width:20px; height:20px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="head">
+      <img class="logo" src="icons/icon-128.png" alt="Ulak" />
+      <h1>Ulak Ekran Görüntüsü</h1>
+      <p class="sub">Herhangi bir sekmede ekran görüntüsü al, işaretle, sohbete gönder.</p>
+    </div>
+
+    <div class="card">
+      <div class="browser"><span class="dot"></span><span id="browserName">Tarayıcı algılanıyor…</span></div>
+
+      <!-- Firefox -->
+      <div id="firefox" class="hidden">
+        <a class="btn" href="https://github.com/betcypsolutions/browser-extension/releases/latest/download/ulak-ekran-goruntusu.xpi">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M5 21h14"/></svg>
+          Firefox'a Yükle
+        </a>
+        <ol class="steps">
+          <li>Butona bas → Firefox <b>"Ekle / Yükle"</b> der, onayla.</li>
+          <li>Bitti. Araç çubuğunda Ulak ikonu çıkar; <code>Alt+Shift+S</code> ile yakala.</li>
+          <li>Sonraki sürümler <b>otomatik güncellenir</b>.</li>
+        </ol>
+        <p class="note">İlk açılışta "izin" sorabilir — izin ver. Çalışması için chat hesabına (panel/gömülü) girişli olman gerekir.</p>
+      </div>
+
+      <!-- Chrome / Edge -->
+      <div id="chromium" class="hidden">
+        <a class="btn" href="https://github.com/betcypsolutions/browser-extension/releases/latest/download/ulak-chrome.zip">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M5 21h14"/></svg>
+          Paketi İndir (.zip)
+        </a>
+        <ol class="steps">
+          <li>İnen <code>ulak-chrome.zip</code>'i <b>bir klasöre çıkar</b> (silme/taşıma).</li>
+          <li>Adres çubuğu: <code id="extUrl">chrome://extensions</code></li>
+          <li>Sağ üst <b>Geliştirici modu</b>'nu aç.</li>
+          <li><b>Paketlenmemiş öğe yükle</b> → çıkardığın klasörü seç.</li>
+        </ol>
+        <p class="note">Chrome/Edge güvenlik nedeniyle mağaza dışı linkten tek-tık kurulumu engeller; bu yüzden "indir + klasör" yöntemi gerekir. (Mağaza yayını yapılırsa tek tık olur.)</p>
+      </div>
+
+      <!-- Diğer -->
+      <div id="other" class="hidden">
+        <p>Bu uzantı <b>Firefox</b> (tek tık) ve <b>Chrome/Edge</b> (paket) destekler. Lütfen bu sayfayı o tarayıcılardan birinde aç.</p>
+        <a class="btn secondary" href="https://github.com/betcypsolutions/browser-extension/releases/latest">Tüm sürümler / dosyalar</a>
+      </div>
+    </div>
+
+    <p class="foot">Ulak — Bet Cyp · destek ekran görüntüsü aracı</p>
+  </div>
+
+  <script>
+    (function () {
+      var ua = navigator.userAgent;
+      var isFirefox = /firefox/i.test(ua);
+      var isEdge = /edg/i.test(ua);
+      var isChrome = /chrome|chromium|crios/i.test(ua) && !isEdge;
+      var name = document.getElementById('browserName');
+      function show(id, label) { document.getElementById(id).classList.remove('hidden'); name.textContent = label; }
+      if (isFirefox) {
+        show('firefox', 'Firefox algılandı');
+      } else if (isEdge) {
+        document.getElementById('extUrl').textContent = 'edge://extensions';
+        show('chromium', 'Edge algılandı');
+      } else if (isChrome) {
+        show('chromium', 'Chrome algılandı');
+      } else {
+        show('other', 'Tarayıcı tanınmadı');
+      }
+    })();
+  </script>
+</body>
+</html>

@@ -83,6 +83,11 @@ if [ "$DO_SIGN" = "1" ]; then
     mkdir -p publish
     XPI_NAME="ulak-ekran-goruntusu-$NEWVER.xpi"
     cp "$XPI" "publish/$XPI_NAME"
+    cp "$XPI" "publish/ulak-ekran-goruntusu.xpi"   # sabit "latest" isim (Firefox tek-tik link)
+    # Chrome paketi (install sayfasinda "indir + load unpacked" icin)
+    ./package.sh >/dev/null 2>&1 || true
+    [ -f dist/livechat-screenshot-chrome.zip ] && cp dist/livechat-screenshot-chrome.zip "publish/ulak-chrome.zip"
+    ./build.sh firefox >/dev/null 2>&1 || true     # package.sh sonrasi manifest.json'u firefox'a geri al
     # update_link: GitHub Releases (GH_REPO) ya da duz UPDATE_BASE
     if [ -n "${GH_REPO:-}" ]; then
       LINK="https://github.com/$GH_REPO/releases/download/v$NEWVER/$XPI_NAME"
@@ -120,11 +125,17 @@ if [ "$DO_REL" = "1" ]; then
   git commit -m "$TAG" || echo "  (commit edilecek yeni degisiklik yok)"
   git push
 
-  echo "→ GitHub release $TAG olusturuluyor + xpi yukleniyor"
+  echo "→ GitHub release $TAG olusturuluyor + dosyalar yukleniyor"
+  # Yuklenecek dosyalar (var olanlar): versiyonlu xpi + sabit xpi + chrome zip
+  ASSETS=()
+  [ -f "$XPI_PATH" ] && ASSETS+=("$XPI_PATH")
+  [ -f "publish/ulak-ekran-goruntusu.xpi" ] && ASSETS+=("publish/ulak-ekran-goruntusu.xpi")
+  [ -f "publish/ulak-chrome.zip" ] && ASSETS+=("publish/ulak-chrome.zip")
+
   if command -v gh >/dev/null 2>&1; then
-    gh release create "$TAG" "$XPI_PATH" -t "Ulak $NEWVER" -n "Otomatik yayin $TAG" \
+    gh release create "$TAG" "${ASSETS[@]}" -t "Ulak $NEWVER" -n "Otomatik yayin $TAG" \
       || { echo "HATA: gh release create basarisiz"; exit 1; }
-    echo "✓ Release $TAG yayinda (gh)"
+    echo "✓ Release $TAG yayinda (gh) — ${#ASSETS[@]} dosya"
   elif [ -n "${GH_TOKEN:-}" ]; then
     REL=$(curl -s -X POST \
       -H "Authorization: token $GH_TOKEN" -H "Accept: application/vnd.github+json" \
@@ -136,12 +147,14 @@ try:
 except Exception:
     print("")')
     if [ -z "$REL_ID" ]; then echo "HATA: release olusturulamadi: $REL"; exit 1; fi
-    curl -s -X POST \
-      -H "Authorization: token $GH_TOKEN" -H "Content-Type: application/octet-stream" \
-      --data-binary @"$XPI_PATH" \
-      "https://uploads.github.com/repos/$GH_REPO/releases/$REL_ID/assets?name=$XPI_NAME" >/dev/null \
-      || { echo "HATA: asset yuklenemedi"; exit 1; }
-    echo "✓ Release $TAG yayinda + xpi yuklendi (API)"
+    for f in "${ASSETS[@]}"; do
+      n=$(basename "$f")
+      curl -s -X POST -H "Authorization: token $GH_TOKEN" -H "Content-Type: application/octet-stream" \
+        --data-binary @"$f" \
+        "https://uploads.github.com/repos/$GH_REPO/releases/$REL_ID/assets?name=$n" >/dev/null \
+        || { echo "HATA: $n yuklenemedi"; exit 1; }
+    done
+    echo "✓ Release $TAG yayinda + ${#ASSETS[@]} dosya yuklendi (API)"
   else
     echo "HATA: --release icin 'gh' CLI ya da GH_TOKEN gerekli."
     echo "  Kur:   sudo apt install gh && gh auth login"
@@ -149,7 +162,9 @@ except Exception:
     exit 1
   fi
   echo ""
-  echo "Kontrol:"
-  echo "  https://raw.githubusercontent.com/$GH_REPO/main/updates.json"
-  echo "  https://github.com/$GH_REPO/releases/download/$TAG/$XPI_NAME"
+  echo "Kontrol / paylasilacak linkler:"
+  echo "  Kurulum sayfasi:  https://betcypsolutions.github.io/browser-extension/install.html"
+  echo "  Firefox (sabit):  https://github.com/$GH_REPO/releases/latest/download/ulak-ekran-goruntusu.xpi"
+  echo "  Chrome zip:       https://github.com/$GH_REPO/releases/latest/download/ulak-chrome.zip"
+  echo "  updates.json:     https://raw.githubusercontent.com/$GH_REPO/main/updates.json"
 fi

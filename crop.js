@@ -35,21 +35,9 @@ function showToast(kind, html, withClose) {
   if (withClose) $('toastClose').onclick = () => window.close();
 }
 
-// API/panel'i background çözer; hata yanıtındaki apiBase + diag'ı gösteririz.
-function showLoginError(apiBase, diag) {
-  let html = 'Giriş bulunamadı.<br><br>Kullanılan API (otomatik): <b>' + (apiBase || '?') +
-    '</b><br><br>Chat panelinde (sekmesinde) giriş yapmış ol, sonra tekrar dene. Özel bir kurulum için uzantı <b>Options</b>\'tan API adresini elle de verebilirsin.';
-  if (diag) {
-    html += '<br><br><small style="opacity:.85;text-align:left;display:block">Teşhis · panel sekmesi: <b>' + diag.tabsFound + '</b>';
-    if (diag.queryError) html += '<br>queryError: ' + diag.queryError;
-    (diag.tabs || []).forEach((t, i) => {
-      html += '<br>[' + i + '] ' + (t.origin || t.url || '?') +
-        ' · token=' + t.hasToken + ' · keys=' + JSON.stringify(t.keys || []) +
-        (t.execError ? ' · execError=' + t.execError : '') + (t.noResult ? ' · noResult' : '');
-    });
-    html += '</small>';
-  }
-  showToast('err', html, true);
+// Bağlanamadı — kullanıcıya sade mesaj (API adresi / teşhis gösterilmez).
+function showLoginError(_apiBase, _diag) {
+  showToast('err', 'Bağlanamadı.', true);
 }
 
 // ---------- kırpma → dataURL ----------
