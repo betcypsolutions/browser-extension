@@ -6,6 +6,8 @@ web-ext-artifacts/
 .amo-upload-uuid
 # package.sh zip'leri
 dist/
+# dev.sh tarayıcıya özel symlink klasörleri (Load unpacked / Temporary Add-on)
+build/
 # Release'e yüklenecek xpi (GitHub Releases asset)
 publish/
 

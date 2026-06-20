@@ -17,26 +17,31 @@ Herhangi bir sekmede/sayfada **ikon** veya **klavye kısayolu** ile ekran görü
 
 ## Kurulum (geliştirici modu)
 
-### Chrome / Edge / Brave
+`./dev.sh` tarayıcıya özel klasörler üretir (`build/chrome`, `build/firefox`); her biri
+kaynak dosyalara symlink + kendi doğru manifest'ini içerir. Böylece Chrome ve Firefox
+**aynı anda** yüklü kalır, çakışmaz ve kök `manifest.json`'a hiç dokunulmaz.
+
 ```bash
-./build.sh chrome           # manifest.json'u Chrome varyantıyla hazırlar
+./dev.sh        # build/chrome  (service_worker)  +  build/firefox  (scripts + gecko)
 ```
+
+### Chrome / Edge / Brave
 1. `chrome://extensions` → **Developer mode** açık.
-2. **Load unpacked** → bu klasörü (`browser-extension/`) seç.
+2. **Load unpacked** → `build/chrome` klasörünü seç. *(Bu yol bir daha değişmez.)*
 3. (İsteğe bağlı) `chrome://extensions/shortcuts` → kısayolu doğrula/değiştir.
 4. Uzantı **Options** (Ayarlar) → **API adresi**: lokal için `http://localhost:3010`, prod için `https://chat-api.cyp.world`.
 
 ### Firefox
-```bash
-./build.sh firefox          # manifest.json'u Firefox varyantıyla hazırlar
-```
 1. `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on**.
-2. Bu klasördeki `manifest.json` dosyasını seç.
+2. `build/firefox/manifest.json` dosyasını seç.
 3. Options'tan API adresini ayarla.
 
-> Not: `build.sh` yalnızca doğru `manifest.*.json` dosyasını `manifest.json`'a kopyalar
-> (her iki tarayıcı da kökte `manifest.json` bekler). Chrome `service_worker`,
-> Firefox `background.scripts` kullandığı için iki varyant var.
+> Dosyalar symlink olduğu için kaynağı düzenlemen anında yansır → sadece ilgili
+> tarayıcıda **Reload** yeter, yeniden `dev.sh` gerekmez. (Yeni dosya eklersen
+> `dev.sh` içindeki `FILES` listesine ekle + `./dev.sh` tekrar çalıştır.)
+>
+> Not: Chrome `service_worker`, Firefox `background.scripts` kullandığı için iki ayrı
+> `manifest.*.json` varyantı var; `dev.sh` her klasöre doğru olanı bağlar.
 
 ## Kalıcı kurulum & paketleme
 

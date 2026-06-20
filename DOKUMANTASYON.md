@@ -46,7 +46,8 @@ başka sekmeden tetiklenemez. Uzantı bu sınırı aşar.
 | `crop.html` / `crop.js` | Kırpma + işaretleme + sohbet seçme + gönderme penceresi (tüm UI) |
 | `options.html` / `options.js` | API adresi (boş = otomatik) |
 | `icons/` | İkonlar (16/48/128/256) |
-| `build.sh` | `build.sh chrome\|firefox` → doğru manifesti `manifest.json`'a kopyalar |
+| `dev.sh` | `build/chrome` + `build/firefox` symlink klasörleri üretir (local yükleme; kök manifest'e dokunmaz) — gitignored |
+| `build.sh` | `build.sh chrome\|firefox` → doğru manifesti `manifest.json`'a kopyalar (paketleme için) |
 | `package.sh` | `dist/` altına chrome/firefox zip'leri üretir |
 | `bump.sh` | **Sürüm + imza + yayın** tek komut (bkz. §6) |
 | `install.html` | Tarayıcı algılayan kurulum sayfası (GitHub Pages'te) |
@@ -118,19 +119,20 @@ Uzantı GÖNDERMEZ. `STAGE_SHOT` → `stageToComposer()`:
 ## 5. Geliştirme / Yerel Test
 
 ```bash
+./dev.sh        # build/chrome + build/firefox (symlink klasörleri, kök manifest'e dokunmaz)
+
 # Chrome/Edge'de test:
-./build.sh chrome
-# chrome://extensions → Geliştirici modu → Paketlenmemiş öğe yükle → bu klasör
-# Değişiklikten sonra: build.sh chrome + uzantı sayfasında Reload (⟳)
+# chrome://extensions → Geliştirici modu → Paketlenmemiş öğe yükle → build/chrome
+# Değişiklikten sonra: sadece uzantı sayfasında Reload (⟳) — symlink, rebuild yok.
 
 # Firefox'ta geçici test:
-./build.sh firefox
-# about:debugging → Bu Firefox → Geçici Eklenti Yükle → manifest.json
+# about:debugging → Bu Firefox → Geçici Eklenti Yükle → build/firefox/manifest.json
 ```
 
-> ⚠️ **GOTCHA:** `manifest.json` build çıktısıdır; `build.sh`/`package.sh`/`bump.sh`
-> çalışınca firefox↔chrome arası değişir. **Chrome reload öncesi mutlaka `./build.sh chrome`**
-> (yoksa firefox varyantı kalır → Chrome service worker'ı bulamaz → uzantı kırık).
+> ✅ **Çözüldü:** Eskiden kök `manifest.json` paylaşımlıydı ve `build.sh`/`bump.sh`
+> onu firefox↔chrome arası değiştirip Chrome'u kırardı. Artık `./dev.sh` her tarayıcıya
+> ayrı `build/<browser>` klasörü verir → ikisi aynı anda yüklü kalır, kök `manifest.json`
+> ne olursa olsun dev klasörleri etkilenmez. (`build/` gitignore'da.)
 
 ---
 
@@ -233,7 +235,7 @@ Yeni LIVECHAT rolü eklerken: (A) `user.entity.ts` enum + migration, (B) MESSAGI
 
 | Belirti | Sebep / Çözüm |
 |---|---|
-| Chrome'da uzantı kırık (service worker yok) | `manifest.json` firefox varyantı kalmış → `./build.sh chrome` + Reload |
+| Chrome'da uzantı kırık (service worker yok) | Kök `manifest.json`'dan değil `build/chrome`'dan yükle → `./dev.sh` + Load unpacked → `build/chrome` (eski tuzak: kök manifest firefox varyantında kalırdı) |
 | "Bağlanamadı." | Chat oturumu açık değil → panel/embed'de girişli ol |
 | Gönderince login'e atıyordu | (Çözüldü) `openSentChat` artık chat.cyp.world sekmesi açmıyor |
 | "T" metin aracı işlevsiz | (Çözüldü) input blur'u erteleme ile düzeltildi |
@@ -247,7 +249,8 @@ Yeni LIVECHAT rolü eklerken: (A) `user.entity.ts` enum + migration, (B) MESSAGI
 ## 11. Hızlı Komut Referansı
 
 ```bash
-./build.sh chrome|firefox          # aktif manifesti seç
+./dev.sh                           # build/chrome + build/firefox symlink klasörleri (local yükleme)
+./build.sh chrome|firefox          # kök manifest.json'a aktif manifesti kopyalar (paketleme için)
 ./package.sh                       # dist/ zip'leri
 ./bump.sh patch --release          # sürüm + imza + yayın + GitHub release (tek komut)
 ./bump.sh 1.2.3 --release          # belirli sürümü yayınla (artırmadan)
