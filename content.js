@@ -4,9 +4,7 @@
 // Giriş yapan kullanıcının JWT'sini arka plana iletir — hiçbir gizli anahtar yok.
 const api = globalThis.browser ?? globalThis.chrome;
 
-// Token'ı önce localStorage'dan, yoksa sessionStorage'dan oku. White-label embed
-// (/embed/*) üçüncü-taraf partitioned iframe'de oturumu sessionStorage'da tutuyor →
-// uzantı bo.cyp.zone gibi gömülü sistemlerde de token'ı buradan bulup gönderebilsin.
+// Yardımcı anahtarları (user, apiBase) önce localStorage'dan, yoksa sessionStorage'dan oku.
 function readLC(key) {
   try {
     const v = localStorage.getItem(key);
@@ -19,9 +17,27 @@ function readLC(key) {
   }
 }
 
+// JWT'nin exp'ini (bitiş, saniye) çöz. Çözülemezse 0.
+function jwtExp(t) {
+  try { return JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).exp || 0; }
+  catch (_) { return 0; }
+}
+
+// Token'ı HEM localStorage HEM sessionStorage'dan oku, exp'i EN GEÇ (taze) olanı seç.
+// Sebep: standalone panel'e doğrudan girince token localStorage'a yazılıyor; white-label
+// embed (/embed/*, örn. bo.cyp.zone) ise sessionStorage'a. İkisi aynı origin'de (chat.cyp.world)
+// yan yana bulunabiliyor → "localStorage öncelikli" okuma ESKİ/expired olanı seçip 401 aldırıyordu.
+function readToken() {
+  let ls = null, ss = null;
+  try { ls = localStorage.getItem('livechat:token'); } catch (_) { /* yut */ }
+  try { ss = sessionStorage.getItem('livechat:token'); } catch (_) { /* yut */ }
+  if (ls && ss) return jwtExp(ss) >= jwtExp(ls) ? ss : ls;
+  return ss || ls;
+}
+
 function relayToken() {
   try {
-    const token = readLC('livechat:token');
+    const token = readToken();
     if (!token) return;
     let user = null;
     try {

@@ -35,9 +35,36 @@ function showToast(kind, html, withClose) {
   if (withClose) $('toastClose').onclick = () => window.close();
 }
 
-// Bağlanamadı — kullanıcıya sade mesaj (API adresi / teşhis gösterilmez).
-function showLoginError(_apiBase, _diag) {
-  showToast('err', 'Bağlanamadı.', true);
+// Oturum/izin sorunu. İki durum:
+//  (a) needsPermission → Firefox MV3'te "tüm siteler" host izni verilmemiş; gömülü
+//      chat iframe'inden (chat.cyp.world) token okunamıyor → "İzin Ver" butonu göster,
+//      kullanıcı jestiyle permissions.request çağır, verilince işlemi tekrar dene.
+//  (b) izin var ama token yok → kullanıcı chat'e giriş yapmamış.
+function showLoginError(apiBase, needsPermission, onRetry) {
+  if (needsPermission) {
+    showToast('err',
+      '<b>Erişim izni gerekiyor</b><br>' +
+      'Uzantının gömülü sohbet penceresinden oturumu okuyabilmesi için ' +
+      '<b>tüm sitelere erişim</b> izni gerekir (Firefox bunu kurulumda otomatik vermez).' +
+      '<div class="act"><button class="btn" id="grantBtn">İzin Ver</button></div>',
+      true);
+    const btn = $('grantBtn');
+    if (btn) btn.onclick = async () => {
+      let granted = false;
+      try { granted = await api.permissions.request({ origins: ['<all_urls>'] }); } catch (_) { granted = false; }
+      if (granted) {
+        $('overlay').classList.remove('show');
+        if (typeof onRetry === 'function') onRetry();
+        else showToast('ok', '✓ İzin verildi. Tekrar dene.', true);
+      } else {
+        showToast('err', 'İzin verilmedi. about:addons → uzantı → İzinler\'den elle açabilirsin.', true);
+      }
+    };
+    return;
+  }
+  showToast('err',
+    'Oturum bulunamadı. Chat uygulamasında (panel veya gömülü embed) giriş yaptığından emin ol, sonra tekrar dene.',
+    true);
 }
 
 // ---------- kırpma → dataURL ----------
@@ -433,7 +460,7 @@ async function loadChannels() {
   await loadRecents();
   const resp = await api.runtime.sendMessage({ type: 'LIST_CHANNELS' });
   if (!resp || resp.error) {
-    if (resp && resp.error === 'AUTH') { showLoginError(resp.apiBase, resp.diag); return; }
+    if (resp && resp.error === 'AUTH') { showLoginError(resp.apiBase, resp.needsPermission, loadChannels); return; }
     $('chatList').innerHTML = '<div class="empty">' + ((resp && resp.error) || 'Kanallar yüklenemedi') + '</div>';
     return;
   }
@@ -463,7 +490,7 @@ async function sendTo(ids) {
 
   const resp = await api.runtime.sendMessage({ type: 'SEND_SHOT', channelIds: list, content, dataUrl: croppedDataUrl, fileName });
 
-  if (resp && resp.error === 'AUTH') { showLoginError(resp.apiBase, resp.diag); return; }
+  if (resp && resp.error === 'AUTH') { showLoginError(resp.apiBase, resp.needsPermission, () => sendTo(ids)); return; }
   if (resp && resp.ok) {
     for (const id of list) await pushRecent(id, nameOfId(id));
     // Gönderim sonrası panel sekmesinde sohbet otomatik açılır (background).
@@ -481,7 +508,7 @@ async function handoffToComposer(id) {
   const fileName = 'ulak-ekran-' + new Date().toISOString().replace(/[:.]/g, '-') + '.png';
   showToast('', '<span class="spinner"></span> "' + nameOfId(id) + '" sohbetine aktarılıyor…', false);
   const resp = await api.runtime.sendMessage({ type: 'STAGE_SHOT', channelId: id, content, dataUrl: croppedDataUrl, fileName });
-  if (resp && resp.error === 'AUTH') { showLoginError(resp.apiBase, resp.diag); return; }
+  if (resp && resp.error === 'AUTH') { showLoginError(resp.apiBase, resp.needsPermission, () => handoffToComposer(id)); return; }
   if (resp && resp.ok) {
     await pushRecent(id, nameOfId(id));
     showToast('ok', '✓ Sohbete aktarıldı — panelde onaylayıp gönder', false);

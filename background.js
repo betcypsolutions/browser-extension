@@ -3,7 +3,10 @@
 const api = globalThis.browser ?? globalThis.chrome;
 
 // Panel (web app) origin'leri — token buralardan okunur (manifest ile aynı).
-const PANEL_MATCHES = ['http://localhost:4200/*', 'https://chat.cyp.world/*'];
+// bo.cyp.zone: white-label gömülü chat — kendi origin'inden token okunur,
+// API'si prod backend (chat-api.cyp.world). Embed `livechat:apiBase` bildirmezse
+// aşağıdaki PANEL_TO_API eşlemesi devreye girer (yoksa origin'e gidip 401 olur).
+const PANEL_MATCHES = ['http://localhost:4200/*', 'https://chat.cyp.world/*', 'https://bo.cyp.zone/*'];
 
 const DEFAULT_API_BASE = 'https://chat-api.cyp.world';
 // Panel origin'leri (sondaki /* olmadan) — gömülü iframe'i tanımak için.
@@ -22,6 +25,7 @@ const API_TO_PANEL = {
 const PANEL_TO_API = {
   'http://localhost:4200': 'http://localhost:3010',
   'https://chat.cyp.world': 'https://chat-api.cyp.world',
+  'https://bo.cyp.zone': 'https://chat-api.cyp.world',
 };
 
 // Auth + API adresini birlikte çöz. Options'ta apiBase doluysa override; boşsa
@@ -446,22 +450,52 @@ async function queryPanelTabs(patterns) {
   return all.filter((t) => t.url && origins.some((o) => t.url.startsWith(o)));
 }
 
+// JWT'nin exp (bitiş) zamanını saniye cinsinden çöz. Çözülemezse 0.
+// Birden fazla frame'de token varsa "en taze" (exp'i en geç) olanı seçmek için.
+function jwtExp(token) {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return typeof payload.exp === 'number' ? payload.exp : 0;
+  } catch (_) { return 0; }
+}
+
 // Belirli panel origin(ler)inden açık sekmede localStorage'tan token oku.
+// allFrames: token HEM üst sayfada (eski/standalone panel) HEM de gömülü chat
+// iframe'inde (white-label embed, örn. bo.cyp.zone → chat.cyp.world iframe'i,
+// sessionStorage) olabilir → tüm frame'leri tara. İkisinde de token varsa exp'i
+// en GEÇ dolanı (taze olanı) seç → üst sayfadaki eski/expired token, iframe'deki
+// taze token'ı ezmesin. Böylece eski sürüm de yeni embed de aynı anda çalışır.
 async function readTokenFromPanelTab(patterns) {
   const tabs = await queryPanelTabs(patterns);
   for (const t of tabs) {
     try {
       const results = await api.scripting.executeScript({
-        target: { tabId: t.id },
-        func: () => ({
-          token: localStorage.getItem('livechat:token') || sessionStorage.getItem('livechat:token'),
-          user: JSON.parse(localStorage.getItem('livechat.panel.user') || sessionStorage.getItem('livechat.panel.user') || 'null'),
-          apiBase: localStorage.getItem('livechat:apiBase') || sessionStorage.getItem('livechat:apiBase') || null,
-          origin: location.origin,
-        }),
+        target: { tabId: t.id, allFrames: true },
+        func: () => {
+          // localStorage'da ESKİ (standalone panel'den kalma, expired) token,
+          // sessionStorage'da TAZE (embed) token olabilir. "localStorage öncelikli"
+          // okuma eski olanı seçip 401 aldırıyordu → exp'i en GEÇ olanı seç.
+          const exp = (t) => {
+            try { return JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).exp || 0; }
+            catch (_) { return 0; }
+          };
+          const ls = localStorage.getItem('livechat:token');
+          const ss = sessionStorage.getItem('livechat:token');
+          const token = (exp(ss) >= exp(ls)) ? (ss || ls) : (ls || ss);
+          return {
+            token: token || null,
+            user: JSON.parse(localStorage.getItem('livechat.panel.user') || sessionStorage.getItem('livechat.panel.user') || 'null'),
+            apiBase: sessionStorage.getItem('livechat:apiBase') || localStorage.getItem('livechat:apiBase') || null,
+            origin: location.origin,
+          };
+        },
       });
-      const r = results && results[0] && results[0].result;
-      if (r && r.token) return r;
+      const hits = (results || []).map((x) => x && x.result).filter((r) => r && r.token);
+      if (hits.length) {
+        // En taze token'ı (exp'i en büyük) tercih et.
+        hits.sort((a, b) => jwtExp(b.token) - jwtExp(a.token));
+        return hits[0];
+      }
     } catch (_) { /* sıradaki sekme */ }
   }
   return null;
@@ -483,46 +517,29 @@ async function getAuth(panelOrigin) {
     return map[r.origin];
   };
 
-  if (panelOrigin) {
-    // Önce GÜNCEL localStorage'ı oku (cache eski/expired olabilir). Yalnız bu
-    // origin'in token'ını kullan — yanlış origin (prod) token'ı localhost'a
-    // gönderilip 401 olmasın diye "herhangi cache"e DÜŞME.
-    const fresh = await readTokenFromPanelTab([panelOrigin + '/*']);
-    if (fresh && fresh.token) return save(fresh);
-    if (map[panelOrigin] && map[panelOrigin].token) return map[panelOrigin];
-    return null;
-  }
-  // panelOrigin bilinmiyorsa (eşleşmeyen API adresi) herhangi panel tokeni.
-  const freshAny = await readTokenFromPanelTab(PANEL_MATCHES);
-  if (freshAny && freshAny.token) return save(freshAny);
-  const anyCached = Object.values(map).find((a) => a && a.token);
-  return anyCached || null;
+  // GÜNCEL oku → cache'i tazele. content.js (iframe içinde NATIVE çalışır, partition'lı
+  // sessionStorage'ı okuyabilir) relay ettiği token da map'te birikmiştir. executeScript
+  // partition'da eski/boş okuyabilir → İKİ kaynağı da map'te toplayıp EN TAZE'yi seçeriz.
+  const patterns = panelOrigin ? [panelOrigin + '/*'] : PANEL_MATCHES;
+  const fresh = await readTokenFromPanelTab(patterns);
+  if (fresh && fresh.token) await save(fresh);
+
+  // Adaylar: panelOrigin verildiyse yalnız o origin (yanlış backend'e token gitmesin);
+  // yoksa tüm cache. Hepsi arasından exp'i EN GEÇ (en taze) olanı seç.
+  let candidates = Object.values(map).filter((a) => a && a.token);
+  if (panelOrigin) candidates = candidates.filter((a) => a.origin === panelOrigin);
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => jwtExp(b.token) - jwtExp(a.token));
+  return candidates[0];
 }
 
-// Teşhis: panel sekmesi bulunuyor mu, localStorage'da hangi anahtarlar var?
-async function getAuthDiag(panelOrigin) {
-  const diag = { panelOrigin, tabsFound: 0, tabs: [] };
-  let tabs = [];
-  try {
-    tabs = await queryPanelTabs(panelOrigin ? [panelOrigin + '/*'] : PANEL_MATCHES);
-  } catch (e) { diag.queryError = String(e); }
-  diag.tabsFound = tabs.length;
-  for (const t of tabs) {
-    const row = { url: t.url };
-    try {
-      const res = await api.scripting.executeScript({
-        target: { tabId: t.id },
-        func: () => ({
-          origin: location.origin,
-          hasToken: !!localStorage.getItem('livechat:token'),
-          keys: Object.keys(localStorage).filter((k) => /token|livechat|auth|jwt/i.test(k)),
-        }),
-      });
-      Object.assign(row, res && res[0] ? res[0].result : { noResult: true });
-    } catch (e) { row.execError = String(e); }
-    diag.tabs.push(row);
-  }
-  return diag;
+// White-label embed (örn. bo.cyp.zone içindeki chat.cyp.world iframe'i) token'ını
+// okuyabilmek için "tüm siteler" host izni şart. Firefox MV3'te host_permissions
+// OPSIYONELDIR (kullanıcı vermezse activeTab yalnız üst frame'i kapsar, çapraz-origin
+// iframe "Missing host permission" verir). İzin yoksa kullanıcıya izin butonu gösteririz.
+async function hasAllUrlsPermission() {
+  try { return await api.permissions.contains({ origins: ['<all_urls>'] }); }
+  catch (_) { return true; } // permissions API yoksa (eski tarayıcı) engelleme.
 }
 
 // Auth'lu API çağrısı — BACKGROUND'tan yapılır ki host_permissions CORS'u
@@ -557,7 +574,7 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       try {
         const { auth, apiBase, panelOrigin } = await resolveAuthAndApi();
         if (!auth || !auth.token) {
-          sendResponse({ error: 'AUTH', apiBase, diag: await getAuthDiag(panelOrigin) });
+          sendResponse({ error: 'AUTH', apiBase, needsPermission: !(await hasAllUrlsPermission()) });
           return;
         }
         const data = await apiCall(apiBase, auth.token, '/api/channels', { method: 'GET' });
@@ -583,7 +600,7 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         const id = msg.channelId;
         if (!id) { sendResponse({ error: 'Sohbet seçilmedi' }); return; }
         const { auth, apiBase, panelOrigin } = await resolveAuthAndApi();
-        if (!auth || !auth.token) { sendResponse({ error: 'AUTH', apiBase, diag: await getAuthDiag(panelOrigin) }); return; }
+        if (!auth || !auth.token) { sendResponse({ error: 'AUTH', apiBase, needsPermission: !(await hasAllUrlsPermission()) }); return; }
         const origin = (auth && auth.origin) || panelOrigin || lastPanelOrigin;
         const stagedTabId = origin ? await stageToComposer(origin, id, msg.dataUrl, msg.fileName, msg.content) : null;
         if (stagedTabId != null) { await openEmbedWidget(stagedTabId); sendResponse({ ok: true }); return; }
@@ -596,7 +613,7 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         const ids = msg.channelIds || (msg.channelId ? [msg.channelId] : []);
         if (!ids.length) { sendResponse({ error: 'Sohbet seçilmedi' }); return; }
         const { auth, apiBase, panelOrigin } = await resolveAuthAndApi();
-        if (!auth || !auth.token) { sendResponse({ error: 'AUTH', apiBase }); return; }
+        if (!auth || !auth.token) { sendResponse({ error: 'AUTH', apiBase, needsPermission: !(await hasAllUrlsPermission()) }); return; }
         lastPanelOrigin = (auth && auth.origin) || panelOrigin || lastPanelOrigin;
         // Tek sohbet → o sohbeti aç; toplu → sadece mesajlaşma arayüzü.
         lastSentChannelId = ids.length === 1 ? ids[0] : null;
@@ -628,8 +645,11 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       } catch (e) { sendResponse({ error: String((e && e.message) || e) }); }
       return;
     }
-    if (msg && msg.type === 'GET_AUTH_DIAG') {
-      sendResponse(await getAuthDiag(msg.panelOrigin || null));
+    if (msg && msg.type === 'REQUEST_PERMISSION') {
+      // crop.js (popup, kullanıcı jesti) buradan tetikler; izin isteği aslında
+      // popup tarafında api.permissions.request ile yapılır — bu yalnız mevcut
+      // durumu döndürür ki popup butonu göstersin/gizlesin.
+      sendResponse({ granted: await hasAllUrlsPermission() });
       return;
     }
     if (msg && msg.type === 'TOKEN' && msg.token && msg.origin) {
