@@ -90,7 +90,10 @@ if [ "$DO_SIGN" = "1" ]; then
   : "${AMO_JWT_SECRET:?AMO_JWT_SECRET gerekli — once 'export AMO_JWT_SECRET=...' yap}"
   npx --yes web-ext sign --channel=unlisted \
     --api-key="$AMO_JWT_ISSUER" --api-secret="$AMO_JWT_SECRET" \
-    --ignore-files build.sh package.sh bump.sh manifest.chrome.json manifest.firefox.json updates.json "dist/**" "publish/**"
+    --ignore-files build.sh package.sh bump.sh dev.sh \
+      manifest.chrome.json manifest.firefox.json updates.json \
+      install.html DOKUMANTASYON.md \
+      "build/**" "dist/**" "publish/**" "web-ext-artifacts/**"
   XPI=$(ls -t web-ext-artifacts/*.xpi | head -1)
   echo "✓ imzalandi: $XPI"
 
