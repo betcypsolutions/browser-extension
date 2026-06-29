@@ -92,7 +92,7 @@ if [ "$DO_SIGN" = "1" ]; then
     --api-key="$AMO_JWT_ISSUER" --api-secret="$AMO_JWT_SECRET" \
     --ignore-files build.sh package.sh bump.sh dev.sh \
       manifest.chrome.json manifest.firefox.json updates.json \
-      install.html DOKUMANTASYON.md \
+      install.html DOKUMANTASYON.md DEPLOY.txt .gitignore .amo-upload-uuid \
       "build/**" "dist/**" "publish/**" "web-ext-artifacts/**"
   XPI=$(ls -t web-ext-artifacts/*.xpi | head -1)
   echo "✓ imzalandi: $XPI"

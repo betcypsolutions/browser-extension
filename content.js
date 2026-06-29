@@ -35,10 +35,23 @@ function readToken() {
   return ss || ls;
 }
 
+// Bu içerik scriptinin ömründe en son token relay edildi mi? Çıkışı (token'ın
+// kaybolması) algılayıp background cache'ini temizletmek için izleriz.
+let __lcHadToken = false;
+
 function relayToken() {
   try {
     const token = readToken();
-    if (!token) return;
+    if (!token) {
+      // Daha önce token vardı, şimdi yok → kullanıcı ÇIKIŞ yaptı (ya da süresi dolup
+      // panel temizledi). background'daki bayat token'ı HEMEN sildir (401 bekleme).
+      if (__lcHadToken) {
+        __lcHadToken = false;
+        try { api.runtime.sendMessage({ type: 'CLEAR_AUTH', origin: location.origin }); } catch (_) { /* yut */ }
+      }
+      return;
+    }
+    __lcHadToken = true;
     let user = null;
     try {
       user = JSON.parse(readLC('livechat.panel.user') || 'null');

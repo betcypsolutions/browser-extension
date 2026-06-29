@@ -379,21 +379,35 @@ async function injectPending(tabId, payload) {
 // sekmede — ya da (b) açık standalone panel sekmesine düşürür. Yeni chat.cyp.world
 // sekmesi AÇMAZ (gömülü kullanıcıda login'e atıyordu). Hiçbiri yoksa false döner.
 // Bir sekmedeki panel iframe'ine (varsa) bekleyen görseli yazar; bulamazsa false.
-async function writePendingToTab(tabId, payload) {
+// expTok/expUid verilirse: görseli SADECE o hesabın frame'ine yaz. Sebep: aynı
+// origin'de (ya da açık başka sekmede) İKİ farklı oturum olabilir (örn. localStorage=casiyer,
+// sessionStorage=agent). Kanal listesini HANGİ hesaptan aldıysak görseli de o hesaba
+// düşürmeliyiz; yoksa channelId o frame'in hesabında bulunmaz → sohbet açılmaz.
+async function writePendingToTab(tabId, payload, expTok, expUid) {
   try {
     const res = await api.scripting.executeScript({
       target: { tabId, allFrames: true },
-      func: (key, val) => {
-        // Panel/embed frame'i = livechat token'ı olan frame (hangi domain olursa olsun).
-        var hasTok = false;
-        try { hasTok = !!(localStorage.getItem('livechat:token') || sessionStorage.getItem('livechat:token')); } catch (e) { hasTok = false; }
-        if (!hasTok) return false;
+      func: (key, val, expToken, expUserId) => {
+        var tok = null;
+        try { tok = localStorage.getItem('livechat:token') || sessionStorage.getItem('livechat:token'); } catch (e) { tok = null; }
+        if (!tok) return false;
+        var uid = null;
+        try {
+          var u = JSON.parse(localStorage.getItem('livechat.panel.user') || sessionStorage.getItem('livechat.panel.user') || 'null');
+          uid = u && u.id != null ? String(u.id) : null;
+        } catch (e) { uid = null; }
+        // Hesap eşleşmesi: aynı token YA DA aynı kullanıcı id. Beklenen kimlik
+        // verilmediyse (geriye uyumluluk) token'lı her frame kabul edilir.
+        if (expToken || expUserId) {
+          var match = (expToken && tok === expToken) || (expUserId && uid && uid === expUserId);
+          if (!match) return false;
+        }
         try { localStorage.setItem(key, val); } catch (e) { /* partitioned */ }
         try { sessionStorage.setItem(key, val); } catch (e) { /* yut */ }
         try { window.dispatchEvent(new CustomEvent('ulak:pendingShot')); } catch (e) { /* yut */ }
         return true;
       },
-      args: ['ulak:pendingShot', JSON.stringify(payload)],
+      args: ['ulak:pendingShot', JSON.stringify(payload), expTok || null, expUid || null],
     });
     return !!(res && res.some((r) => r && r.result === true));
   } catch (_) { return false; }
@@ -403,21 +417,28 @@ async function writePendingToTab(tabId, payload) {
 // alındığı sekme, sonra gömülü chat'in BULUNDUĞU sekme (başka sayfadaysan da
 // açık bo.cyp.zone sekmesine düşer); o da yoksa açık standalone panel sekmesi.
 // Yeni chat.cyp.world sekmesi AÇMAZ. Başarılıysa sekme id'sini, yoksa null döner.
-async function stageToComposer(origin, channelId, dataUrl, fileName, content) {
+async function stageToComposer(origin, channelId, dataUrl, fileName, content, auth) {
   const payload = { dataUrl, fileName: fileName || 'ulak-ekran.png', channelId, caption: content || '', ts: Date.now() };
+  // Kanal listesini HANGİ hesaptan aldıysak (auth) görseli de O hesabın frame'ine
+  // sabitle → "uzantı A hesabını gösteriyor, görseli B frame'ine düşürüyor" sorununu bitir.
+  const expTok = (auth && auth.token) || null;
+  const expUid = (auth && auth.user && auth.user.id != null) ? String(auth.user.id) : null;
 
-  // (a) Gömülü: aday sekmeler — yakalanan sekme + gömülü chat sekmesi (SW restart'a dayanıklı).
+  // (a) Açık frame'ler: önce hızlı adaylar (yakalanan sekme + gömülü chat sekmesi),
+  //     sonra TÜM panel sekmeleri — doğru hesabın frame'ini nerede olursa bul.
   const panelTabId = await getPanelTabId();
-  const candidates = [...new Set([lastCaptureTabId, panelTabId].filter((x) => x != null))];
-  for (const tabId of candidates) {
-    if (await writePendingToTab(tabId, payload)) {
+  let allTabIds = [];
+  try { allTabIds = (await queryPanelTabs(PANEL_MATCHES)).map((t) => t.id); } catch (_) { allTabIds = []; }
+  const order = [...new Set([lastCaptureTabId, panelTabId, ...allTabIds].filter((x) => x != null))];
+  for (const tabId of order) {
+    if (await writePendingToTab(tabId, payload, expTok, expUid)) {
       try { await api.tabs.update(tabId, { active: true }); } catch (_) { /* yut */ }
       try { const t = await api.tabs.get(tabId); if (t) await api.windows.update(t.windowId, { focused: true }); } catch (_) { /* yut */ }
       return tabId;
     }
   }
 
-  // (b) Açık standalone panel sekmesi varsa oraya düşür (klasik akış).
+  // (b) Açık standalone panel sekmesi varsa oraya düşür (klasik akış: ?id ile yükle).
   const tabs = await queryPanelTabs([origin + '/*']);
   const tab = tabs && tabs[0];
   if (tab) {
@@ -459,24 +480,25 @@ function jwtExp(token) {
   } catch (_) { return 0; }
 }
 
-// Belirli panel origin(ler)inden açık sekmede localStorage'tan token oku.
-// allFrames: token HEM üst sayfada (eski/standalone panel) HEM de gömülü chat
-// iframe'inde (white-label embed, örn. bo.cyp.zone → chat.cyp.world iframe'i,
-// sessionStorage) olabilir → tüm frame'leri tara. İkisinde de token varsa exp'i
-// en GEÇ dolanı (taze olanı) seç → üst sayfadaki eski/expired token, iframe'deki
-// taze token'ı ezmesin. Böylece eski sürüm de yeni embed de aynı anda çalışır.
-async function readTokenFromPanelTab(patterns) {
+// Açık panel/embed sekmelerinden token'ları CANLI oku. Dönüş:
+//   { hits:    [{token,user,apiBase,origin}, ...] — token bulunan frame'ler (exp'e göre sıralı),
+//     empties: Set<origin> — açık AMA hiç token vermeyen origin'ler (= ÇIKIŞ yapılmış) }
+// allFrames: token HEM üst sayfada (standalone panel) HEM de gömülü chat iframe'inde
+// (white-label embed, örn. bo.cyp.zone → chat.cyp.world iframe'i, sessionStorage)
+// olabilir → tüm frame'leri tara, exp'i en GEÇ (taze) olanı seç (eski/expired token
+// taze olanı ezmesin). empties → getAuth bayat cache'i temizler (çıkış sonrası eski
+// token kullanılıp 401 alınmasın).
+async function readLiveAuth(patterns) {
   const tabs = await queryPanelTabs(patterns);
+  const hits = [];
+  const empties = new Set();
   for (const t of tabs) {
     try {
       const results = await api.scripting.executeScript({
         target: { tabId: t.id, allFrames: true },
         func: () => {
-          // localStorage'da ESKİ (standalone panel'den kalma, expired) token,
-          // sessionStorage'da TAZE (embed) token olabilir. "localStorage öncelikli"
-          // okuma eski olanı seçip 401 aldırıyordu → exp'i en GEÇ olanı seç.
-          const exp = (t) => {
-            try { return JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).exp || 0; }
+          const exp = (tk) => {
+            try { return JSON.parse(atob(tk.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).exp || 0; }
             catch (_) { return 0; }
           };
           const ls = localStorage.getItem('livechat:token');
@@ -490,15 +512,18 @@ async function readTokenFromPanelTab(patterns) {
           };
         },
       });
-      const hits = (results || []).map((x) => x && x.result).filter((r) => r && r.token);
-      if (hits.length) {
-        // En taze token'ı (exp'i en büyük) tercih et.
-        hits.sort((a, b) => jwtExp(b.token) - jwtExp(a.token));
-        return hits[0];
+      for (const x of (results || [])) {
+        const r = x && x.result;
+        if (!r) continue;
+        if (r.token) hits.push({ token: r.token, user: r.user, apiBase: r.apiBase, origin: r.origin, tabId: t.id });
+        else if (r.origin) empties.add(r.origin);   // açık ama token yok → çıkış adayı
       }
-    } catch (_) { /* sıradaki sekme */ }
+    } catch (_) { /* host izni yok / sıradaki sekme */ }
   }
-  return null;
+  hits.sort((a, b) => jwtExp(b.token) - jwtExp(a.token));
+  // Bir origin token'lı frame de verdiyse "boş" sayma (üst sayfa boş, iframe dolu).
+  for (const h of hits) empties.delete(h.origin);
+  return { hits, empties };
 }
 
 // İstenen panel origin'ine ait token'ı getir. Sıra: (1) eşlenen origin cache,
@@ -508,25 +533,52 @@ async function readTokenFromPanelTab(patterns) {
 async function getAuth(panelOrigin) {
   const stored = await api.storage.session.get('authByOrigin');
   const map = stored.authByOrigin || {};
-  const save = async (r) => {
+  const save = (r) => {
+    const ex = map[r.origin];
+    // Aynı origin'de iki açık sekme (örn. ana site + embed) FARKLI token taşıyabilir;
+    // mevcut kayıt DAHA TAZE ise üzerine yazma (yoksa sıralama gereği eski olan kazanırdı).
+    if (ex && ex.token && jwtExp(ex.token) > jwtExp(r.token)) return;
     map[r.origin] = {
       token: r.token, user: r.user, origin: r.origin,
-      apiBase: r.apiBase || (map[r.origin] && map[r.origin].apiBase) || null,
+      apiBase: r.apiBase || (ex && ex.apiBase) || null,
+      // Kaydı üreten sekme — sekme kapanınca bu token'ı atmak için (aşağıda).
+      tabId: r.tabId != null ? r.tabId : (ex && ex.tabId != null ? ex.tabId : null),
     };
-    await api.storage.session.set({ authByOrigin: map });
-    return map[r.origin];
   };
 
-  // GÜNCEL oku → cache'i tazele. content.js (iframe içinde NATIVE çalışır, partition'lı
-  // sessionStorage'ı okuyabilir) relay ettiği token da map'te birikmiştir. executeScript
-  // partition'da eski/boş okuyabilir → İKİ kaynağı da map'te toplayıp EN TAZE'yi seçeriz.
   const patterns = panelOrigin ? [panelOrigin + '/*'] : PANEL_MATCHES;
-  const fresh = await readTokenFromPanelTab(patterns);
-  if (fresh && fresh.token) await save(fresh);
+  const live = await readLiveAuth(patterns);
+
+  // 1) KAPANMIŞ SEKME temizliği: tabId'si artık AÇIK panel sekmeleri arasında olmayan
+  //    kayıt = o sekme kapandı → token'ı at. Yoksa "iki sekme açıkken birini kapatınca
+  //    hâlâ kapalı olanın (süresi dolmamış) token'ıyla çalışıyor" sorunu oluşuyordu.
+  //    ÖNCE temizle, SONRA canlı yaz → kapanan sekmenin bayat kaydı taze olanı bloklamasın.
+  let openTabIds = null;
+  try { openTabIds = new Set((await queryPanelTabs(PANEL_MATCHES)).map((t) => t.id)); } catch (_) { openTabIds = null; }
+  if (openTabIds) {
+    for (const o of Object.keys(map)) {
+      const a = map[o];
+      if (a && a.tabId != null && !openTabIds.has(a.tabId)) delete map[o];
+    }
+  }
+  // 2) ÇIKIŞ yapılmış (açık ama tokensız) origin'leri at.
+  for (const o of live.empties) delete map[o];
+  // 3) Canlı token'ları yaz — aynı origin'de EN TAZE kalır. content.js (iframe içinde
+  //    NATIVE çalışır) relay'i de map'te birikir; executeScript partition'da boş okursa
+  //    o backup devreye girer → İKİ kaynak birlikte en taze + açık olanı verir.
+  for (const r of live.hits) save(r);
+
+  await api.storage.session.set({ authByOrigin: map });
 
   // Adaylar: panelOrigin verildiyse yalnız o origin (yanlış backend'e token gitmesin);
-  // yoksa tüm cache. Hepsi arasından exp'i EN GEÇ (en taze) olanı seç.
-  let candidates = Object.values(map).filter((a) => a && a.token);
+  // yoksa tüm cache. SÜRESİ DOLMUŞ token'ı eleme (exp'i çözülemeyeni bilinmiyor say,
+  // tut) → eski token'la sessizce yanlış hesaba iş yapma; yoksa "tekrar giriş" çıkar.
+  const now = Date.now() / 1000;
+  let candidates = Object.values(map).filter((a) => {
+    if (!a || !a.token) return false;
+    const e = jwtExp(a.token);
+    return e === 0 || e > now + 10;   // bilinmeyen exp'i tut; bilinen-expired'ı at
+  });
   if (panelOrigin) candidates = candidates.filter((a) => a.origin === panelOrigin);
   if (!candidates.length) return null;
   candidates.sort((a, b) => jwtExp(b.token) - jwtExp(a.token));
@@ -602,7 +654,7 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         const { auth, apiBase, panelOrigin } = await resolveAuthAndApi();
         if (!auth || !auth.token) { sendResponse({ error: 'AUTH', apiBase, needsPermission: !(await hasAllUrlsPermission()) }); return; }
         const origin = (auth && auth.origin) || panelOrigin || lastPanelOrigin;
-        const stagedTabId = origin ? await stageToComposer(origin, id, msg.dataUrl, msg.fileName, msg.content) : null;
+        const stagedTabId = origin ? await stageToComposer(origin, id, msg.dataUrl, msg.fileName, msg.content, auth) : null;
         if (stagedTabId != null) { await openEmbedWidget(stagedTabId); sendResponse({ ok: true }); return; }
         sendResponse({ error: 'Mesajlaşmanın açık olduğu bir sekme bulunamadı. bo.cyp.zone (gömülü chat) sekmesini açık tut ya da "Direkt gönder" kullan.' });
       } catch (e) { sendResponse({ error: String((e && e.message) || e) }); }
@@ -652,6 +704,17 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       sendResponse({ granted: await hasAllUrlsPermission() });
       return;
     }
+    if (msg && msg.type === 'CLEAR_AUTH' && msg.origin) {
+      // content.js: o origin'de token kayboldu (ÇIKIŞ) → cache'ten sil ki bayat
+      // token'la iş yapılmasın. lastPanelTabId'yi de o sekmeyse temizle.
+      try {
+        const stored = await api.storage.session.get('authByOrigin');
+        const map = stored.authByOrigin || {};
+        if (map[msg.origin]) { delete map[msg.origin]; await api.storage.session.set({ authByOrigin: map }); }
+      } catch (_) { /* yut */ }
+      sendResponse({ ok: true });
+      return;
+    }
     if (msg && msg.type === 'TOKEN' && msg.token && msg.origin) {
       // Token taşıyan HER frame bir panel/embed'dir (domain sabit liste GEREKMEZ;
       // hangi sisteme gömülürse gömülsün çalışır) → o sekmeyi hatırla, böylece başka
@@ -663,7 +726,10 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       const stored = await api.storage.session.get('authByOrigin');
       const map = stored.authByOrigin || {};
       // apiBase: panel kendi bildirdiyse sakla → API'yi domain'den bağımsız biliriz.
-      map[msg.origin] = { token: msg.token, user: msg.user, origin: msg.origin, apiBase: msg.apiBase || null };
+      map[msg.origin] = {
+        token: msg.token, user: msg.user, origin: msg.origin, apiBase: msg.apiBase || null,
+        tabId: (_sender && _sender.tab && _sender.tab.id != null) ? _sender.tab.id : null,
+      };
       await api.storage.session.set({ authByOrigin: map });
       sendResponse({ ok: true });
       return;
